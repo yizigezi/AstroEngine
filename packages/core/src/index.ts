@@ -35,8 +35,21 @@ export class GameObject {
   }
 
   addComponent<T extends ComponentData>(type: string, data: T): Component<T> {
-    const component: Component<T> = { type, data };
-    this.components.set(type, component);
+    return this.addComponentInstance({ type, data });
+  }
+
+  /** Attach a component instance created by a registered factory or plugin. */
+  addComponentInstance<T extends ComponentData>(component: Component<T>): Component<T> {
+    if (typeof component !== 'object' || component === null) {
+      throw new TypeError('Component must be an object');
+    }
+    if (typeof component.type !== 'string' || component.type.trim().length === 0) {
+      throw new TypeError('Component type must be a non-empty string');
+    }
+    if (typeof component.data !== 'object' || component.data === null || Array.isArray(component.data)) {
+      throw new TypeError(`Component "${component.type}" data must be an object`);
+    }
+    this.components.set(component.type, component);
     return component;
   }
 
