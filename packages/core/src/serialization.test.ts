@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GameObject, Scene } from './index.js';
+import { ComponentRegistry } from './registry.js';
 import {
   deserializeScene,
   parseScene,
@@ -7,6 +8,20 @@ import {
   stringifyScene,
   validateSceneDocument,
 } from './serialization.js';
+
+const documentWithComponents = {
+  version: 1 as const,
+  objects: [{
+    id: 'planet',
+    type: 'CelestialBody',
+    components: { Transform: { x: 1 }, Tag: { value: 'planet' } },
+    children: [{
+      id: 'moon',
+      type: 'CelestialBody',
+      components: { Transform: { x: 2 } },
+    }],
+  }],
+};
 
 describe('scene serialization', () => {
   it('round-trips objects, component data, and nested children', () => {
@@ -54,6 +69,63 @@ describe('scene serialization', () => {
         ],
       }),
     ).toThrow(/Duplicate object id "child"/);
+  });
+
+  it('keeps legacy plain-data restoration when no registry is supplied', () => {
+    const restored = deserializeScene(documentWithComponents);
+    expect(restored.get('planet')?.getComponent('Transform')).toEqual({
+      type: 'Transform',
+      data: { x: 1 },
+    });
+    expect(restored.get('planet')?.children[0]?.getComponent('Transform')?.data).toEqual({ x: 2 });
+  });
+
+  it('uses registered factories for root and nested object components', () => {
+    const registry = new ComponentRegistry();
+    const created: string[] = [];
+    registry.register('Transform', {
+      create: (data) => {
+        created.push(String(data.x));
+        return { type: 'Transform', data, runtime: true } as { type: string; data: typeof data; runtime: boolean };
+      },
+    });
+    registry.register('Tag', {
+      create: (data) => ({ type: 'Tag', data }),
+    });
+
+    const restored = deserializeScene(documentWithComponents, registry);
+    expect(created).toEqual(['1', '2']);
+    expect((restored.get('planet')?.getComponent('Transform') as { runtime: boolean }).runtime).toBe(true);
+    expect(restored.get('planet')?.children[0]?.getComponent('Transform')?.data).toEqual({ x: 2 });
+  });
+
+  it('fails clearly when a component type is not registered', () => {
+    const registry = new ComponentRegistry();
+    registry.register('Transform', { create: (data) => ({ type: 'Transform', data }) });
+    expect(() => deserializeScene(documentWithComponents, registry)).toThrow(
+      /No component factory registered for "Tag"/,
+    );
+  });
+
+  it('rejects invalid factory return values and mismatched component types', () => {
+    const registry = new ComponentRegistry();
+    registry.register('Transform', { create: () => ({ type: 'Other', data: {} }) });
+    expect(() => deserializeScene(documentWithComponents, registry)).toThrow(
+      /Factory for "Transform" returned component type "Other"/,
+    );
+
+    const invalid = new ComponentRegistry();
+    invalid.register('Transform', { create: () => null as never });
+    expect(() => deserializeScene(documentWithComponents, invalid)).toThrow(
+      /must return a component object/,
+    );
+  });
+
+  it('propagates factory errors unchanged', () => {
+    const registry = new ComponentRegistry();
+    const failure = new Error('factory failed');
+    registry.register('Transform', { create: () => { throw failure; } });
+    expect(() => deserializeScene(documentWithComponents, registry)).toThrow(failure);
   });
 
   it('rejects invalid JSON text', () => {
