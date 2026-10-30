@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { GameObject, Scene } from './index.js';
 import { ComponentRegistry } from './registry.js';
 import {
@@ -95,7 +95,7 @@ describe('scene serialization', () => {
 
     const restored = deserializeScene(documentWithComponents, registry);
     expect(created).toEqual(['1', '2']);
-    expect((restored.get('planet')?.getComponent('Transform') as { runtime: boolean }).runtime).toBe(true);
+    expect((restored.get('planet')?.getComponent('Transform') as unknown as { runtime: boolean }).runtime).toBe(true);
     expect(restored.get('planet')?.children[0]?.getComponent('Transform')?.data).toEqual({ x: 2 });
   });
 
