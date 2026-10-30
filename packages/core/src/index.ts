@@ -96,3 +96,5 @@ export * from './event.js';
 export * from './system.js';
 export * from './world.js';
 export * from './engine.js';
+
+export * from './serialization.js';
