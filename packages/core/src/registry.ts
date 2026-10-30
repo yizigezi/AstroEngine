@@ -19,6 +19,9 @@ export class ComponentRegistry {
     if (this.factories.has(type)) {
       throw new Error(`Component factory "${type}" is already registered`);
     }
+    if (typeof factory !== 'object' || factory === null || typeof factory.create !== 'function') {
+      throw new TypeError('Component factory must provide a create(data) function');
+    }
     this.factories.set(type, factory as ComponentFactory);
   }
 
@@ -31,11 +34,29 @@ export class ComponentRegistry {
   }
 
   create<T extends ComponentData = ComponentData>(type: string, data: T): Component<T> {
+    this.assertType(type);
     const factory = this.get<T>(type);
     if (!factory) {
       throw new Error(`No component factory registered for "${type}"`);
     }
-    return factory.create(data);
+
+    // Do not catch factory errors: callers need the original failure.
+    const component: unknown = factory.create(data);
+    if (typeof component !== 'object' || component === null) {
+      throw new TypeError(`Factory for "${type}" must return a component object`);
+    }
+    const candidate = component as Partial<Component>;
+    if (candidate.type !== type) {
+      throw new TypeError(`Factory for "${type}" returned component type "${String(candidate.type)}"`);
+    }
+    if (
+      typeof candidate.data !== 'object' ||
+      candidate.data === null ||
+      Array.isArray(candidate.data)
+    ) {
+      throw new TypeError(`Factory for "${type}" must return component data as an object`);
+    }
+    return component as Component<T>;
   }
 
   unregister(type: string): boolean {
