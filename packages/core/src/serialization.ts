@@ -1,5 +1,6 @@
 import { GameObject, Scene } from './index.js';
 import type { ObjectDefinition } from './index.js';
+import type { ComponentRegistry } from './registry.js';
 
 /** The serialized scene format. Increment version when making breaking format changes. */
 export interface SceneDocument {
@@ -83,13 +84,33 @@ export function serializeScene(scene: Scene): SceneDocument {
   };
 }
 
-/** Restore a Scene from a previously serialized document or parsed JSON value. */
-export function deserializeScene(value: unknown): Scene {
+function restoreObject(definition: ObjectDefinition, registry: ComponentRegistry): GameObject {
+  const object = new GameObject({
+    id: definition.id,
+    type: definition.type,
+    ...(definition.name === undefined ? {} : { name: definition.name }),
+  });
+
+  for (const [type, data] of Object.entries(definition.components ?? {})) {
+    object.addComponentInstance(registry.create(type, data));
+  }
+  for (const child of definition.children ?? []) {
+    object.addChild(restoreObject(child, registry));
+  }
+  return object;
+}
+
+/**
+ * Restore a scene. Without a registry, components remain plain data objects for
+ * backwards compatibility. With a registry, every serialized component type
+ * must have a registered factory.
+ */
+export function deserializeScene(value: unknown, registry?: ComponentRegistry): Scene {
   const document = validateSceneDocument(value);
   const scene = new Scene();
 
   for (const definition of document.objects) {
-    scene.add(new GameObject(definition));
+    scene.add(registry ? restoreObject(definition, registry) : new GameObject(definition));
   }
 
   return scene;
@@ -101,6 +122,6 @@ export function stringifyScene(scene: Scene, space = 2): string {
 }
 
 /** Parse JSON text and restore a Scene. */
-export function parseScene(json: string): Scene {
-  return deserializeScene(JSON.parse(json) as unknown);
+export function parseScene(json: string, registry?: ComponentRegistry): Scene {
+  return deserializeScene(JSON.parse(json) as unknown, registry);
 }
