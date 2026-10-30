@@ -98,3 +98,4 @@ export * from './world.js';
 export * from './engine.js';
 
 export * from './serialization.js';
+export * from './registry.js';
