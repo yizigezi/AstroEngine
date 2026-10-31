@@ -3,6 +3,20 @@ export type ComponentData = Record<string, unknown>;
 export interface Component<T extends ComponentData = ComponentData> {
   readonly type: string;
   readonly data: T;
+
+  /** Whether this component participates in lifecycle updates. Defaults to true. */
+  enabled?: boolean;
+
+  /** Called once after the component has been attached to a GameObject. */
+  onAttach?(owner: GameObject): void;
+  /** Called when an enabled component becomes enabled. */
+  onEnable?(owner: GameObject): void;
+  /** Called when an enabled component becomes disabled. */
+  onDisable?(owner: GameObject): void;
+  /** Called immediately before the component is removed from its GameObject. */
+  onDetach?(owner: GameObject): void;
+  /** Called during GameObject.update() while the component is enabled. */
+  onUpdate?(deltaTime: number, owner: GameObject): void;
 }
 
 export interface ObjectDefinition {
@@ -49,7 +63,41 @@ export class GameObject {
     if (typeof component.data !== 'object' || component.data === null || Array.isArray(component.data)) {
       throw new TypeError(`Component "${component.type}" data must be an object`);
     }
+    if (this.components.has(component.type)) {
+      throw new Error(`Component "${component.type}" is already attached to GameObject "${this.id}"`);
+    }
+
     this.components.set(component.type, component);
+    let attachAttempted = false;
+    let enableAttempted = false;
+
+    try {
+      attachAttempted = true;
+      component.onAttach?.(this);
+      if (component.enabled !== false) {
+        enableAttempted = true;
+        component.onEnable?.(this);
+      }
+    } catch (error) {
+      this.components.delete(component.type);
+      // Best-effort rollback must not hide the original lifecycle error.
+      if (enableAttempted) {
+        try {
+          component.onDisable?.(this);
+        } catch {
+          // Preserve the original error.
+        }
+      }
+      if (attachAttempted) {
+        try {
+          component.onDetach?.(this);
+        } catch {
+          // Preserve the original error.
+        }
+      }
+      throw error;
+    }
+
     return component;
   }
 
@@ -61,8 +109,64 @@ export class GameObject {
     return this.components.has(type);
   }
 
+  isComponentEnabled(type: string): boolean {
+    const component = this.components.get(type);
+    return component !== undefined && component.enabled !== false;
+  }
+
+  /** Enable or disable an attached component. Returns false when no state change is needed. */
+  setComponentEnabled(type: string, enabled: boolean): boolean {
+    const component = this.components.get(type);
+    if (!component || (component.enabled !== false) === enabled) {
+      return false;
+    }
+
+    component.enabled = enabled;
+    if (enabled) {
+      component.onEnable?.(this);
+    } else {
+      component.onDisable?.(this);
+    }
+    return true;
+  }
+
   removeComponent(type: string): boolean {
-    return this.components.delete(type);
+    const component = this.components.get(type);
+    if (!component) return false;
+
+    this.components.delete(type);
+    let lifecycleError: unknown;
+
+    if (component.enabled !== false) {
+      try {
+        component.onDisable?.(this);
+      } catch (error) {
+        lifecycleError = error;
+      }
+    }
+
+    try {
+      component.onDetach?.(this);
+    } catch (error) {
+      if (lifecycleError === undefined) lifecycleError = error;
+    }
+
+    if (lifecycleError !== undefined) throw lifecycleError;
+    return true;
+  }
+
+  /** Update enabled components in insertion order. */
+  update(deltaTime: number): void {
+    if (!Number.isFinite(deltaTime) || deltaTime < 0) {
+      throw new RangeError('deltaTime must be a finite, non-negative number');
+    }
+
+    for (const [type, component] of [...this.components.entries()]) {
+      // A previous component may have removed or disabled this component.
+      if (this.components.get(type) === component && component.enabled !== false) {
+        component.onUpdate?.(deltaTime, this);
+      }
+    }
   }
 
   addChild(child: GameObject): void {
