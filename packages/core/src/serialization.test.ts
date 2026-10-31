@@ -71,6 +71,51 @@ describe('scene serialization', () => {
     ).toThrow(/Duplicate object id "child"/);
   });
 
+  it('rejects duplicate IDs in a runtime scene, including nested children', () => {
+    const scene = new Scene();
+    scene.add(new GameObject({
+      id: 'root',
+      type: 'Root',
+      children: [{ id: 'nested', type: 'Child' }],
+    }));
+
+    expect(() => scene.add(new GameObject({ id: 'nested', type: 'Other' }))).toThrow(
+      /Object with id "nested" already exists/,
+    );
+  });
+
+  it('indexes nested objects for direct scene lookup', () => {
+    const scene = new Scene();
+    const root = new GameObject({
+      id: 'root',
+      type: 'Root',
+      children: [{ id: 'nested', type: 'Child' }],
+    });
+    scene.add(root);
+
+    expect(scene.get('root')).toBe(root);
+    expect(scene.get('nested')).toBe(root.children[0]);
+  });
+
+  it('updates the scene index when a child is added after the root', () => {
+    const scene = new Scene();
+    const root = new GameObject({ id: 'root', type: 'Root' });
+    scene.add(root);
+    const child = new GameObject({ id: 'child', type: 'Child' });
+
+    root.addChild(child);
+    expect(scene.get('child')).toBe(child);
+  });
+
+  it('rejects self and ancestor cycles in the runtime object tree', () => {
+    const root = new GameObject({ id: 'root', type: 'Root' });
+    const child = new GameObject({ id: 'child', type: 'Child' });
+    root.addChild(child);
+
+    expect(() => root.addChild(root)).toThrow(/as its own child/);
+    expect(() => child.addChild(root)).toThrow(/would create a cycle/);
+  });
+
   it('keeps legacy plain-data restoration when no registry is supplied', () => {
     const restored = deserializeScene(documentWithComponents);
     expect(restored.get('planet')?.getComponent('Transform')).toEqual({
