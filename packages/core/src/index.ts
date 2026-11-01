@@ -19,6 +19,8 @@ export class GameObject {
   name?: string;
   private readonly components = new Map<string, Component>();
   readonly children: GameObject[] = [];
+  private parent?: GameObject;
+  private scene?: Scene;
 
   constructor(definition: ObjectDefinition) {
     this.id = definition.id;
@@ -66,6 +68,24 @@ export class GameObject {
   }
 
   addChild(child: GameObject): void {
+    if (child === this) {
+      throw new Error(`Cannot add object "${this.id}" as its own child`);
+    }
+    if (this.isDescendantOf(child)) {
+      throw new Error(`Cannot add object "${child.id}" because it would create a cycle`);
+    }
+    if (child.parent && child.parent !== this) {
+      throw new Error(`Object "${child.id}" already has a parent`);
+    }
+    if (child.parent === this) {
+      return;
+    }
+
+    if (this.scene) {
+      this.scene.registerSubtree(child);
+    }
+
+    child.parent = this;
     this.children.push(child);
   }
 
@@ -80,28 +100,89 @@ export class GameObject {
       ...(this.children.length === 0 ? {} : { children: this.children.map((child) => child.toJSON()) }),
     };
   }
+
+  private isDescendantOf(object: GameObject): boolean {
+    let current: GameObject | undefined = this;
+    while (current) {
+      if (current === object) return true;
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /** Internal scene ownership propagation. */
+  _setScene(scene: Scene | undefined): void {
+    this.scene = scene;
+    for (const child of this.children) {
+      child._setScene(scene);
+    }
+  }
 }
 
 export class Scene {
   readonly objects = new Map<string, GameObject>();
+  private readonly objectIndex = new Map<string, GameObject>();
 
   add(object: GameObject): void {
-    if (this.objects.has(object.id)) {
+    if (this.objects.has(object.id) || this.objectIndex.has(object.id)) {
       throw new Error(`Object with id "${object.id}" already exists`);
     }
+
+    this.registerSubtree(object);
     this.objects.set(object.id, object);
   }
 
   get(id: string): GameObject | undefined {
-    return this.objects.get(id);
+    return this.objectIndex.get(id);
   }
 
   remove(id: string): boolean {
-    return this.objects.delete(id);
+    const object = this.objects.get(id);
+    if (!object) return false;
+
+    this.unregisterSubtree(object);
+    this.objects.delete(id);
+    return true;
   }
 
   clear(): void {
+    for (const object of this.objects.values()) {
+      object._setScene(undefined);
+    }
     this.objects.clear();
+    this.objectIndex.clear();
+  }
+
+  /** Register a subtree and reject any duplicate IDs before mutating the scene. */
+  registerSubtree(object: GameObject): void {
+    const pending = new Map<string, GameObject>();
+    const visit = (current: GameObject): void => {
+      if (pending.has(current.id) || this.objectIndex.has(current.id)) {
+        throw new Error(`Object with id "${current.id}" already exists`);
+      }
+      pending.set(current.id, current);
+      for (const child of current.children) {
+        visit(child);
+      }
+    };
+
+    visit(object);
+    for (const [id, current] of pending) {
+      this.objectIndex.set(id, current);
+    }
+    object._setScene(this);
+  }
+
+  private unregisterSubtree(object: GameObject): void {
+    const visit = (current: GameObject): void => {
+      this.objectIndex.delete(current.id);
+      for (const child of current.children) {
+        visit(child);
+      }
+    };
+
+    visit(object);
+    object._setScene(undefined);
   }
 }
 
