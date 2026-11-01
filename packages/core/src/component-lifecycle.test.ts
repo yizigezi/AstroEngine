@@ -63,7 +63,8 @@ describe('GameObject component lifecycle', () => {
     expect(object.setComponentEnabled('Missing', false)).toBe(false);
     expect(object.setComponentEnabled('Tag', false)).toBe(true);
     expect(object.setComponentEnabled('Tag', false)).toBe(false);
-    expect(onEnable).not.toHaveBeenCalled();
+    // 挂载即启用会触发一次 onEnable；冗余的状态切换不再追加触发
+    expect(onEnable).toHaveBeenCalledOnce();
     expect(onDisable).toHaveBeenCalledOnce();
   });
 
